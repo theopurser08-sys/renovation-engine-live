@@ -2,13 +2,12 @@ import os
 import requests
 from typing import List, Optional, Dict, Any
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 
-# ---- Config ----
 SERPAPI_KEY = os.getenv("SERPAPI_KEY")
 
-app = FastAPI(title="Renovation Price Finder Live", version="1.0")
+app = FastAPI(title="Renovation Price Finder Clean JSON", version="1.1")
 
 app.add_middleware(
     CORSMiddleware,
@@ -18,7 +17,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ---- Models ----
+# Models
 class ItemRequest(BaseModel):
     name: str
     brand: Optional[str] = None
@@ -39,10 +38,14 @@ class Product(BaseModel):
     source: Optional[str]
     thumbnail: Optional[str]
 
-class SearchResponse(BaseModel):
-    results: Dict[str, List[Product]]
+class Result(BaseModel):
+    query: str
+    products: List[Product]
 
-# ---- Helpers ----
+class SearchResponse(BaseModel):
+    results: List[Result]
+
+# Helpers
 def call_serpapi(query: str, gl: str, hl: str, num: int):
     if not SERPAPI_KEY:
         raise HTTPException(status_code=500, detail="SERPAPI_KEY not set")
@@ -69,14 +72,14 @@ def normalize(entry) -> Product:
         thumbnail=entry.get("thumbnail")
     )
 
-# ---- Endpoints ----
+# Endpoints
 @app.get("/health")
 def health():
     return {"status": "ok"}
 
 @app.post("/search_live", response_model=SearchResponse)
 def search_live(req: SearchRequest):
-    output = {}
+    results = []
     for item in req.items:
         q = item.name
         if item.brand: q = f"{item.brand} {q}"
@@ -85,5 +88,5 @@ def search_live(req: SearchRequest):
         data = call_serpapi(q, req.country, req.language, req.num_results)
         products = [normalize(e) for e in data.get("shopping_results", []) if e.get("extracted_price")]
         products.sort(key=lambda x: x.price or 999999)
-        output[q] = products
-    return SearchResponse(results=output)
+        results.append(Result(query=q, products=products))
+    return SearchResponse(results=results)
